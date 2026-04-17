@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Blox-O-Rama | Rotation Fixed</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; touch-action: none; }
+        canvas { display: block; }
+        .ui-element { pointer-events: auto; }
+        #ui-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 10; display: flex; flex-direction: column; justify-content: space-between; padding: 15px; }
+        
+        #joy-container { width: 100px; height: 100px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; }
+        #joy-knob { width: 40px; height: 40px; background: #fff; border-radius: 50%; opacity: 0.5; position: absolute; }
+
+        .nametag { position: absolute; background: rgba(0,0,0,0.8); color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; transform: translate(-50%, -100%); white-space: nowrap; pointer-events: none; border: 1px solid rgba(255,255,255,0.2); }
+        .pixel-border { border: 4px solid white; box-shadow: 4px 4px 0px 0px rgba(0,0,0,1); }
+        
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        #mobile-controls { display: none; }
+        @media (pointer: coarse) { #mobile-controls { display: flex; } }
+
+        #admin-panel { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="nametag-layer" class="fixed inset-0 pointer-events-none"></div>
+
+    <div id="ui-overlay">
+        <!-- Header -->
+        <div class="flex justify-between items-start">
+            <div id="logo-btn" class="ui-element bg-blue-600 p-2 pixel-border cursor-pointer hover:bg-blue-500 active:scale-95 transition-all">
+                <h1 class="text-white font-bold italic tracking-tighter text-lg leading-none">BLOX-O-RAMA</h1>
+                <div class="flex gap-2">
+                    <p id="player-count" class="text-[8px] text-blue-200 uppercase font-bold">Offline</p>
+                    <p id="platform-tag" class="text-[8px] text-yellow-300 uppercase font-bold">Detecting...</p>
+                </div>
+            </div>
+            <div class="flex flex-col gap-2 items-end">
+                <div class="ui-element bg-yellow-400 text-black px-3 py-1 font-black text-xs border-2 border-black">
+                    $ <span id="bux-val">0</span>
+                </div>
+                <button id="build-btn-ui" class="ui-element bg-green-500 text-white font-bold px-4 py-2 pixel-border text-xs active:bg-green-400">BUILD [E]</button>
+            </div>
+        </div>
+
+        <!-- Social / AI Chat -->
+        <div class="ui-element w-full max-w-[320px] bg-black/70 border-2 border-white p-2 flex flex-col max-h-[220px]">
+            <div id="chat-content" class="flex-1 overflow-y-auto space-y-1 text-[10px] pr-1 no-scrollbar">
+                <div class="text-gray-400 italic text-[9px]">Rotation Fixed: Blocks now follow your orientation exactly.</div>
+            </div>
+            <div id="typing" class="text-[9px] text-green-400 h-3 italic"></div>
+            <input type="text" id="chat-in" placeholder="Press '/' to chat..." class="bg-transparent border-t border-white/20 mt-1 p-1 outline-none text-white text-[10px]">
+        </div>
+
+        <!-- Mobile Interface -->
+        <div id="mobile-controls" class="justify-between items-end w-full">
+            <div id="joy-container" class="ui-element"><div id="joy-knob"></div></div>
+            <button id="jump-btn-mobile" class="ui-element w-16 h-16 bg-white/10 border-4 border-white/40 rounded-full flex items-center justify-center font-black text-white mb-8 mr-4 active:bg-white/30">JUMP</button>
+        </div>
+    </div>
+
+    <!-- Hidden Admin Terminal -->
+    <div id="admin-panel" class="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-6 ui-element">
+        <div class="bg-zinc-900 p-6 pixel-border w-full max-w-md border-red-600">
+            <h2 class="text-2xl font-black mb-4 text-red-600 italic underline">ADMIN TERMINAL</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <button onclick="adminAction('rich')" class="bg-zinc-800 p-3 border border-zinc-700 text-[10px] text-white hover:bg-zinc-700">GRANT $1M</button>
+                <button onclick="adminAction('nuke')" class="bg-zinc-800 p-3 border border-zinc-700 text-[10px] text-white hover:bg-red-900">WIPE SERVER</button>
+                <button onclick="adminAction('gravity')" class="bg-zinc-800 p-3 border border-zinc-700 text-[10px] text-white hover:bg-zinc-700">MOON GRAVITY</button>
+                <button onclick="adminAction('speed')" class="bg-zinc-800 p-3 border border-zinc-700 text-[10px] text-white hover:bg-zinc-700">FLUX SPEED</button>
+            </div>
+            <div class="mt-4 p-2 bg-black text-[9px] text-gray-500 break-all font-mono" id="debug-info"></div>
+            <button onclick="toggleAdmin(false)" class="w-full mt-6 bg-red-600 p-2 font-black text-white uppercase active:scale-95">EXIT</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc, deleteDoc, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'global-blox-v1';
+        const apiKey = ""; 
+
+        let scene, camera, renderer, player;
+        let otherPlayers = {}, blocks = {}, npcs = [];
+        let yaw = 0, pitch = 0, bux = 0, gravity = 30, moveSpeed = 400;
+        let vel = new THREE.Vector3(), keys = {};
+        let currentUser = null;
+
+        let joyActive = false, joyOrigin = {x:0, y:0}, moveInput = {x:0, y:0};
+        let lookActive = false, lastLook = {x:0, y:0};
+
+        const NPC_DEFS = { "001": "Critic", "002": "Hype", "003": "Sage", "004": "Runner", "005": "Noob", "006": "Chaos" };
+
+        init();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 150);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.5);
+            sun.position.set(50, 100, 50);
+            scene.add(sun);
+
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), new THREE.MeshPhongMaterial({ color: 0x4a7c4a }));
+            ground.rotation.x = -Math.PI/2;
+            scene.add(ground);
+            scene.add(new THREE.GridHelper(1000, 100, 0x000000, 0x1d3a1d));
+
+            player = createChar(0x0066ff);
+            scene.add(player);
+            player.position.set(0, 1, 0);
+
+            Object.keys(NPC_DEFS).forEach((id) => {
+                const npc = createChar(Math.random() * 0xffffff);
+                npc.position.set((Math.random()-0.5)*60, 1, (Math.random()-0.5)*60);
+                npc.userData = { id, tag: createTag(`@${id}`, "text-green-400"), timer: 0, target: npc.position.clone() };
+                npcs.push(npc);
+                scene.add(npc);
+            });
+
+            setupGlobalInput();
+            animate();
+
+            signInAnonymously(auth).then(userCred => {
+                currentUser = userCred.user;
+                document.getElementById('debug-info').innerText = `ID: ${currentUser.uid} | App: ${appId}`;
+                startSync();
+            });
+        }
+
+        function createChar(color) {
+            const g = new THREE.Group();
+            const b = new THREE.Mesh(new THREE.BoxGeometry(1, 1.2, 0.6), new THREE.MeshPhongMaterial({ color }));
+            b.position.y = 0.6;
+            const h = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), new THREE.MeshPhongMaterial({ color: 0xffcc00 }));
+            h.position.y = 1.55;
+            g.add(b, h);
+            return g;
+        }
+
+        function createTag(text, cls = "text-white") {
+            const el = document.createElement('div');
+            el.className = `nametag ${cls}`;
+            el.innerText = text;
+            document.getElementById('nametag-layer').appendChild(el);
+            return el;
+        }
+
+        function setupGlobalInput() {
+            const isTouch = ('ontouchstart' in window);
+            document.getElementById('platform-tag').innerText = isTouch ? "Mobile" : "Desktop";
+
+            window.onkeydown = e => {
+                keys[e.code] = true;
+                if (e.code === 'Slash') { e.preventDefault(); document.getElementById('chat-in').focus(); }
+                if (e.code === 'KeyE') handleBuild();
+                if (e.code === 'Space' && player.position.y <= 1.1) vel.y = 12;
+            };
+            window.onkeyup = e => keys[e.code] = false;
+
+            document.body.addEventListener('click', (e) => {
+                if (!isTouch && document.activeElement.tagName !== 'INPUT' && e.target.tagName === 'CANVAS') {
+                    document.body.requestPointerLock();
+                }
+            });
+
+            window.addEventListener('mousemove', e => {
+                if (document.pointerLockElement) {
+                    yaw -= e.movementX * 0.003;
+                    pitch = Math.max(-1.5, Math.min(1.5, pitch - e.movementY * 0.003));
+                }
+            });
+
+            const joyWrap = document.getElementById('joy-container');
+            const joyKnob = document.getElementById('joy-knob');
+            joyWrap.ontouchstart = e => { joyActive = true; const r = joyWrap.getBoundingClientRect(); joyOrigin = { x: r.left + r.width/2, y: r.top + r.height/2 }; };
+
+            window.addEventListener('touchmove', e => {
+                for (let t of e.touches) {
+                    if (joyActive && t.clientX < window.innerWidth/2) {
+                        const dx = t.clientX - joyOrigin.x, dy = t.clientY - joyOrigin.y;
+                        const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
+                        const angle = Math.atan2(dy, dx);
+                        joyKnob.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+                        moveInput = { x: Math.cos(angle)*(dist/40), y: -Math.sin(angle)*(dist/40) };
+                    } else if (t.clientX > window.innerWidth/2 && t.target.id !== 'jump-btn-mobile' && t.target.id !== 'build-btn-ui') {
+                        if (!lookActive) { lookActive = true; lastLook = {x: t.clientX, y: t.clientY}; }
+                        else {
+                            yaw -= (t.clientX - lastLook.x) * 0.008;
+                            pitch = Math.max(-1.5, Math.min(1.5, pitch - (t.clientY - lastLook.y) * 0.008));
+                            lastLook = {x: t.clientX, y: t.clientY};
+                        }
+                    }
+                }
+            }, { passive: false });
+
+            window.addEventListener('touchend', () => { joyActive = false; lookActive = false; joyKnob.style.transform = ''; moveInput = {x:0, y:0}; });
+            
+            document.getElementById('build-btn-ui').onclick = handleBuild;
+            document.getElementById('jump-btn-mobile').onclick = () => { if (player.position.y <= 1.1) vel.y = 12; };
+
+            const chatIn = document.getElementById('chat-in');
+            chatIn.onkeydown = e => {
+                if (e.key === 'Enter' && chatIn.value.trim()) {
+                    addChat("YOU", chatIn.value, "text-blue-400");
+                    const m = chatIn.value;
+                    chatIn.value = "";
+                    const tags = m.match(/@\d+/g);
+                    if (tags) callAI(m, tags.map(t => t.replace('@','')));
+                }
+            };
+
+            let logoClick = 0;
+            document.getElementById('logo-btn').onclick = () => { logoClick++; if (logoClick >= 5) toggleAdmin(true); setTimeout(() => logoClick = 0, 1500); };
+        }
+
+        async function startSync() {
+            if (!currentUser) return;
+            const playersRef = collection(db, 'artifacts', appId, 'public', 'data', 'players');
+            const blocksRef = collection(db, 'artifacts', appId, 'public', 'data', 'blocks');
+
+            onSnapshot(playersRef, (snap) => {
+                snap.docChanges().forEach(change => {
+                    const id = change.doc.id;
+                    if (id === currentUser.uid) return;
+                    const data = change.doc.data();
+                    if (change.type === "added" || change.type === "modified") {
+                        if (!otherPlayers[id]) {
+                            otherPlayers[id] = createChar(0xcccccc);
+                            otherPlayers[id].userData.tag = createTag(`Player_${id.slice(0,4)}`);
+                            scene.add(otherPlayers[id]);
+                        }
+                        otherPlayers[id].position.set(data.x, data.y, data.z);
+                        otherPlayers[id].rotation.y = data.yaw;
+                    }
+                });
+                document.getElementById('player-count').innerText = `${Object.keys(otherPlayers).length + 1} ONLINE`;
+            });
+
+            onSnapshot(blocksRef, (snap) => {
+                snap.docChanges().forEach(change => {
+                    const id = change.doc.id;
+                    if (change.type === "added") {
+                        const data = change.doc.data();
+                        const b = new THREE.Mesh(new THREE.BoxGeometry(2,2,2), new THREE.MeshPhongMaterial({ color: data.color }));
+                        b.position.set(data.x, data.y, data.z);
+                        scene.add(b);
+                        blocks[id] = b;
+                    } else if (change.type === "removed" && blocks[id]) {
+                        scene.remove(blocks[id]);
+                        delete blocks[id];
+                    }
+                });
+            });
+
+            setInterval(() => {
+                setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'players', currentUser.uid), {
+                    x: player.position.x, y: player.position.y, z: player.position.z,
+                    yaw: yaw, lastSeen: serverTimestamp()
+                }, { merge: true });
+            }, 100);
+        }
+
+        async function handleBuild() {
+            if (!currentUser) return;
+            
+            // CORRECT ROTATION LOGIC:
+            // Get the world forward direction of the player group
+            const forward = new THREE.Vector3(0, 0, -1);
+            forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+            
+            // Position block 4 units in front of player
+            const spawnPos = player.position.clone().add(forward.multiplyScalar(4));
+            
+            // Grid snap
+            const snapX = Math.round(spawnPos.x / 2) * 2;
+            const snapZ = Math.round(spawnPos.z / 2) * 2;
+            
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'blocks'), {
+                    x: snapX, y: 1, z: snapZ, color: Math.random() * 0xffffff, owner: currentUser.uid, time: serverTimestamp()
+                });
+                bux += 10;
+                document.getElementById('bux-val').innerText = bux;
+            } catch(e) {}
+        }
+
+        async function callAI(prompt, ids) {
+            const t = document.getElementById('typing'); t.innerText = "Processing tags...";
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ contents: [{parts:[{text: prompt}]}], systemInstruction: {parts:[{text: `Respond as NPCs: ${ids.join(',')}. Max 15 words. Format: [ID]: message`}]} })
+                });
+                const data = await res.json();
+                const text = data.candidates[0].content.parts[0].text;
+                text.split('\n').forEach(line => {
+                    if (line.includes(':')) {
+                        const [id, m] = line.split(':');
+                        const cleanId = id.replace(/[^0-9]/g, '');
+                        if (NPC_DEFS[cleanId]) setTimeout(() => addChat(`@${cleanId}`, m.trim(), "text-green-400"), 300);
+                    }
+                });
+            } catch(e) {} finally { t.innerText = ""; }
+        }
+
+        function addChat(user, m, color) {
+            const c = document.getElementById('chat-content');
+            const d = document.createElement('div');
+            d.innerHTML = `<span class="${color} font-bold">${user}:</span> ${m}`;
+            c.appendChild(d); c.scrollTop = c.scrollHeight;
+        }
+
+        window.toggleAdmin = (s) => document.getElementById('admin-panel').style.display = s ? 'flex' : 'none';
+        window.adminAction = async (type) => {
+            if (type === 'rich') { bux += 1000000; document.getElementById('bux-val').innerText = bux; }
+            if (type === 'gravity') gravity = 6;
+            if (type === 'speed') moveSpeed = 1500;
+            if (type === 'nuke') {
+                const s = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'blocks'));
+                s.forEach(d => deleteDoc(d.ref));
+            }
+            toggleAdmin(false);
+        };
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = 0.016;
+
+            vel.x -= vel.x * 10 * dt; vel.z -= vel.z * 10 * dt; vel.y -= gravity * dt;
+
+            let mX = (keys['KeyD']?1:0) - (keys['KeyA']?1:0) + moveInput.x;
+            let mZ = (keys['KeyW']?1:0) - (keys['KeyS']?1:0) + moveInput.y;
+            
+            if (Math.abs(mX) > 0.05 || Math.abs(mZ) > 0.05) {
+                const forwardX = -Math.sin(yaw);
+                const forwardZ = -Math.cos(yaw);
+                const rightX = Math.cos(yaw);
+                const rightZ = -Math.sin(yaw);
+                vel.x += (forwardX * mZ + rightX * mX) * moveSpeed * dt;
+                vel.z += (forwardZ * mZ + rightZ * mX) * moveSpeed * dt;
+            }
+
+            player.position.x += vel.x * dt;
+            player.position.z += vel.z * dt;
+            player.position.y += vel.y * dt;
+            player.rotation.y = yaw;
+            
+            if (player.position.y < 1) { player.position.y = 1; vel.y = 0; }
+
+            const updateTag = (obj) => {
+                if (!obj.userData.tag) return;
+                const v = obj.position.clone().add(new THREE.Vector3(0, 2.4, 0)).project(camera);
+                if (v.z < 1) {
+                    obj.userData.tag.style.display = 'block';
+                    obj.userData.tag.style.left = `${(v.x * 0.5 + 0.5) * window.innerWidth}px`;
+                    obj.userData.tag.style.top = `${(v.y * -0.5 + 0.5) * window.innerHeight}px`;
+                } else obj.userData.tag.style.display = 'none';
+            };
+
+            npcs.forEach(npc => {
+                npc.userData.timer -= dt;
+                if (npc.userData.timer <= 0) {
+                    npc.userData.target.set((Math.random()-0.5)*80, 1, (Math.random()-0.5)*80);
+                    npc.userData.timer = 6 + Math.random()*10;
+                }
+                const steer = npc.userData.target.clone().sub(npc.position).normalize();
+                npc.position.add(steer.multiplyScalar(0.06));
+                npc.lookAt(npc.userData.target.x, 1, npc.userData.target.z);
+                updateTag(npc);
+            });
+
+            Object.values(otherPlayers).forEach(p => updateTag(p));
+
+            const cOff = new THREE.Vector3(0, 5, 12).applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0)));
+            camera.position.copy(player.position).add(cOff);
+            camera.lookAt(player.position.x, player.position.y + 1.5, player.position.z);
+            renderer.render(scene, camera);
+        }
+
+        window.onresize = () => { camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); };
+    </script>
+</body>
+</html>
